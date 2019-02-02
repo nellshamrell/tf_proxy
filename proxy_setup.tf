@@ -92,6 +92,7 @@ resource "aws_security_group" "proxy_sg" {
     }
 }
 
+
 resource "aws_instance" "proxy_server" {
     count         = 1
     ami           = "ami-ba602bc2"
@@ -104,11 +105,7 @@ resource "aws_instance" "proxy_server" {
     provisioner "remote-exec" {
         inline = [
             "sudo apt-get install -y squid3",
-            "sleep 300",
-            "sudo sh -c \"echo acl localnet src ${aws_instance.workstation.public_ip} >> /etc/squid/squid.conf\"",
-            "sudo sh -c \"echo http_access allow localnet >> /etc/squid/squid.conf\"",
-            "sudo systemctl restart squid.service"
-      ]
+        ]
 
         connection {
             host        = "${self.public_ip}"
@@ -122,6 +119,40 @@ resource "aws_instance" "proxy_server" {
         Name = "nell-proxy-demo"
     }
 }
+
+
+data "template_file" "squid_conf" {
+  template = "${file("squid_conf.tpl")}"
+
+  vars = {
+    workstation_ip_addr = "${aws_instance.workstation.public_ip}"
+  }
+}
+
+# This needs to be done after the squid install on the proxy server is complete
+resource "null_resource" "set_squid_conf" {
+    connection {
+        host        = "${aws_instance.proxy_server.public_ip}"
+        type        = "ssh"
+        user        = "ubuntu"
+        private_key = "${file("${var.key_path}")}"
+    } 
+
+    provisioner "file" {
+        content     = "${data.template_file.squid_conf.rendered}"
+#        destination = "/etc/squid/squid.conf"
+        destination = "~/squid.conf"
+    }
+
+    provisioner "remote-exec" {
+      inline = [
+          "sudo mv ~/squid.conf /etc/squid/squid.conf",
+          "sudo systemctl restart squid.service"
+      ]
+    }
+}
+
+
 
 resource "aws_security_group_rule" "restrict_workstation_outbound" {
     type      = "egress"
@@ -142,7 +173,7 @@ resource "null_resource" "set_http_proxy" {
 
     provisioner "remote-exec" {
          inline = [
-             "echo \"http_proxy=http://${aws_instance.proxy_server.public_ip}:3128\" >> ~/.bashrc",
+             "echo \"export http_proxy=http://${aws_instance.proxy_server.public_ip}:3128\" >> ~/.bashrc",
              ". ~/.bashrc"
          ]
     }
