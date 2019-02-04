@@ -29,7 +29,7 @@ resource "aws_security_group" "workstation_sg" {
         cidr_blocks = ["0.0.0.0/0"]
     }
 
-        egress {
+    egress {
         from_port   = 0
         to_port     = 0
         protocol    = "-1"
@@ -140,7 +140,7 @@ resource "null_resource" "set_squid_conf" {
 
     provisioner "file" {
         content     = "${data.template_file.squid_conf.rendered}"
-#        destination = "/etc/squid/squid.conf"
+        destination = "/etc/squid/squid.conf"
         destination = "~/squid.conf"
     }
 
@@ -152,16 +152,6 @@ resource "null_resource" "set_squid_conf" {
     }
 }
 
-
-
-resource "aws_security_group_rule" "restrict_workstation_outbound" {
-    type      = "egress"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["${aws_instance.proxy_server.public_ip}/32"]
-    security_group_id = "${aws_security_group.workstation_sg.id}"
-}
 
 resource "null_resource" "set_http_proxy" {
     connection {
@@ -179,23 +169,29 @@ resource "null_resource" "set_http_proxy" {
     }
 }
 
-/*
-resource "aws_security_group" "server_to_scan_sg" {
-    name = "server_to_scan_proxy_sg"
+resource "aws_security_group" "server_behind_proxy_sg" {
+    name = "server_behind_proxy_proxy_sg"
     description = "allow inbound traffic for workstation"
 
     ingress {
-        from_port   = 22
-        to_port     = 22
+        from_port   = 80
+        to_port     = 80
         protocol    = "tcp"
         cidr_blocks = ["${aws_instance.proxy_server.public_ip}/32"]
     }
 
     ingress {
-        from_port   = 8888
-        to_port     = 8888
+        from_port   = 443
+        to_port     = 443
         protocol    = "tcp"
         cidr_blocks = ["${aws_instance.proxy_server.public_ip}/32"]
+    }
+
+    ingress {
+        from_port   = 22
+        to_port     = 22
+        protocol    = "tcp"
+        cidr_blocks = ["0.0.0.0/0"]
     }
 
     egress {
@@ -205,17 +201,35 @@ resource "aws_security_group" "server_to_scan_sg" {
         cidr_blocks = ["0.0.0.0/0"]
     }
 }
-resource "aws_instance" "server_to_scan" {
+resource "aws_instance" "server_behind_proxy" {
     count         = 1
     ami           = "ami-ba602bc2"
     instance_type = "t2.micro"
     key_name      = "${var.key_name}"
 
     security_groups = [
-        "${aws_security_group.workstation_sg.name}",
+        "${aws_security_group.server_behind_proxy_sg.name}",
     ]
+
+    provisioner "remote-exec" {
+        inline = [
+            "sudo apt-get update",
+            "sleep 120",
+            "sudo apt-get install -y apache2"
+        ]
+
+        connection {
+            host        = "${self.public_ip}"
+            type        = "ssh"
+            user        = "ubuntu"
+            private_key = "${file("${var.key_path}")}"
+        }
+    }
+
+    tags {
+        Name = "nell-server-behind-proxy"
+    }
 }
-*/
 
 output "workstation_ip" {
     value = "${aws_instance.workstation.public_ip}"
@@ -225,8 +239,6 @@ output "proxy_server_ip" {
     value = "${aws_instance.proxy_server.public_ip}"
 }
 
-/*
-output "server_to_scan_ip" {
-    value = "${aws_instance.server_to_scan.public_ip}"
+output "server_behind_proxy_ip" {
+    value = "${aws_instance.server_behind_proxy.public_ip}"
 }
-*/
